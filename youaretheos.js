@@ -66,10 +66,9 @@ function delay(time) {
   await delay(500);
   await page.screenshot({ path: 'game_start.png' });
 
-  let gameState;
 
   while (true) {
-    gameState = await getState(page, nrCpus, nrRamRows);
+    const gameState = await getState(page, nrCpus);
 
     // end the loop once it is game over
     if (gameState.isGameOver) {
@@ -79,22 +78,6 @@ function delay(time) {
     // press the IO button
     if (gameState.hasIO) {
       await page.mouse.click(50, 10);
-    }
-
-    //empty the not used ram (if we need to add other pages in)
-    if (gameState.ramPagesToMove.length > 0) {
-      for (let clickInstruction of gameState.ramPagesToMove) {
-        await page.mouse.click(clickInstruction.x, clickInstruction.y);
-      }
-      await delay(delayBetweenActionGroups);
-    }
-
-    //move pages from disk to ram (if needed)
-    if (gameState.diskPagesToMove.length > 0) {
-      for (let clickInstruction of gameState.diskPagesToMove) {
-        await page.mouse.click(clickInstruction.x, clickInstruction.y);
-      }
-      await delay(delayBetweenActionGroups);
     }
 
     //remove processes from cpu
@@ -108,6 +91,25 @@ function delay(time) {
     //add proccesses to empty cpus
     for (let clickInstruction of gameState.processClickList) {
       await page.mouse.click(clickInstruction.x, clickInstruction.y);
+    }
+
+    await delay(delayBetweenActionGroups);
+
+    const memoryState = await getMemory(page, nrRamRows);
+
+    //empty the not used ram (if we need to add other pages in)
+    if (memoryState.ramPagesToMove?.length > 0) {
+      for (let clickInstruction of memoryState.ramPagesToMove) {
+        await page.mouse.click(clickInstruction.x, clickInstruction.y);
+      }
+      await delay(delayBetweenActionGroups);
+    }
+
+    //move pages from disk to ram (if needed)
+    if (memoryState.diskPagesToMove?.length > 0) {
+      for (let clickInstruction of memoryState.diskPagesToMove) {
+        await page.mouse.click(clickInstruction.x, clickInstruction.y);
+      }
     }
 
     await delay(iterationDelay);
@@ -194,6 +196,25 @@ async function getState(page, nrCpus, nrRamRows) {
       }
     }
 
+    return {
+      isGameOver,
+      hasIO,
+      cpuClickList,
+      processClickList: processes.sort(prioritySort).slice(0, nrProcessesToAdd),
+    };
+  }, nrCpus);
+}
+
+async function getMemory(page, nrRamRows) {
+  return await page.evaluate((nrRamRows) => {
+    function getPixelFromContext(context, x, y) {
+      const imageData = context.getImageData(x, y, 1, 1);
+      return imageData.data.slice(0, 3).join(",");
+    }
+
+    const canvas = document.getElementById("canvas");
+    const context = canvas.getContext("2d");
+
     //get memory stats (TODO - handle the case when not enough free memory is in ram for all the processes and therefore no swap is possible by just removing not currently used pages)
     const diskStartY = 155 + (nrRamRows + 1) * 37 + 7;
     const diskRowsY = []
@@ -242,12 +263,8 @@ async function getState(page, nrCpus, nrRamRows) {
 
 
     return {
-      isGameOver,
-      hasIO,
-      cpuClickList,
-      processClickList: processes.sort(prioritySort).slice(0, nrProcessesToAdd),
       ramPagesToMove: notUsedRamPages.slice(0, minFreePagesNeeded - nrFreeRamPages),
       diskPagesToMove,
     };
-  }, nrCpus, nrRamRows);
+  }, nrRamRows);
 }
